@@ -1,44 +1,35 @@
 services:
-  # PostgreSQL Database
   db:
     image: postgres:16-alpine
-    container_name: postgres_db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: secret
-      POSTGRES_DB: appdb
+      POSTGRES_DB: tududb
+      POSTGRES_USER: tududb
+      POSTGRES_PASSWORD: tudupass
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql # runs once on first start
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U admin -d appdb"]
+      test: ["CMD-SHELL", "pg_isready -U tududb -d tududb"]
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - app_network
 
-  # Django Backend
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: django_backend
     restart: unless-stopped
-    command: >
-      sh -c "python manage.py migrate &&
-             python manage.py runserver 0.0.0.0:8000"
     environment:
-      DJANGO_SECRET_KEY: change-me-in-production
-      DJANGO_DEBUG: "True"
-      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,backend"
-      DB_HOST: db
-      DB_PORT: 5432
-      DB_NAME: appdb
-      DB_USER: admin
-      DB_PASSWORD: secret
+      POSTGRES_DB: tududb
+      POSTGRES_USER: tududb
+      POSTGRES_PASSWORD: tudupass
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      DJANGO_SECRET_KEY: your-secret-key-change-in-production
+      DEBUG: "True"
+      ALLOWED_HOSTS: "localhost,127.0.0.1,backend"
+      CORS_ALLOWED_ORIGINS: "http://localhost:3000"
     volumes:
       - ./backend:/app
     ports:
@@ -46,19 +37,19 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    networks:
-      - app_network
+    command: >
+      sh -c "python manage.py makemigrations &&
+             python manage.py migrate &&
+             python manage.py loaddata fixtures/initial_data.json &&
+             python manage.py runserver 0.0.0.0:8000"
 
-  # Next.js Frontend
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: nextjs_frontend
     restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8000
-      INTERNAL_API_URL: http://backend:8000
     volumes:
       - ./frontend:/app
       - /app/node_modules
@@ -67,13 +58,6 @@ services:
       - "3000:3000"
     depends_on:
       - backend
-    networks:
-      - app_network
 
 volumes:
   postgres_data:
-    driver: local
-
-networks:
-  app_network:
-    driver: bridge
